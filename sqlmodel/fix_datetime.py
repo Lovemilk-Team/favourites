@@ -1,4 +1,5 @@
-from datetime import UTC, datetime as original_datetime
+from datetime import datetime, UTC
+import sqlalchemy.types as types
 
 """
 由于一些原因, 使用 SQLModel/SQLAlchemy,
@@ -6,36 +7,36 @@ from datetime import UTC, datetime as original_datetime
 导致 datetime 认为这是本地的时间, 会在非 UTC 时区的设备上出现时差.
 
 同时, 部分库 (包括但不限于 fastapi.Response.set_cookie 的 `expires` 参数) 需要有 tzinfo 的 UTC 时间,
-从而出现问题
+从而出现问题.
 
-一个可能的解决方法是将 datetime.datetime class 替换, 并在 `__new__` 时将 tzinfo 为 `None` 的时间全部视为 UTC.
+一个可能的解决方法是自己实现一个可用于 编码/解码 数据库内容的 UTCDatetime 类型, 使得 SQLAlchemy 在 ORM 时自动转换.
+
+使用方法:
+```
+Field(..., sa_type=UTCDatetime)
+```
 """
 
 
-def init_datetime():
-    original_new = original_datetime.__new__
-    original_now = original_datetime.now
+class UTCDatetime(types.TypeDecorator):
+    impl = types.TEXT
 
-    class UTCDatetime(original_datetime):
-        max = original_datetime.max.replace(tzinfo=UTC)
-        min = original_datetime.min.replace(tzinfo=UTC)
+    cache_ok = True
 
-        def __new__(cls, *args, **kwargs):
-            if len(args) >= 8:
-                tzinfo = args[7]
-                if tzinfo is None:
-                    args = (*args[:7], UTC, *args[8:])
-            else:
-                tzinfo = kwargs.get("tzinfo", None)
-                if tzinfo is None:
-                    kwargs["tzinfo"] = UTC
+    def process_bind_param(self, value: datetime | None, _dialect):
+        if value is None:
+            return None
 
-            return original_new(cls, *args, **kwargs)  # type: ignore
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.isoformat()
 
-        @classmethod
-        def now(cls, tz=UTC):
-            return original_now(tz)
+    def process_result_value(self, value: str | None, _dialect):
+        if value is None:
+            return None
 
-    import datetime
+        datetime_obj = datetime.fromisoformat(value)
+        if datetime_obj.tzinfo is None:
+            datetime_obj = datetime_obj.replace(tzinfo=UTC)
 
-    datetime.datetime = UTCDatetime
+        return datetime_obj
