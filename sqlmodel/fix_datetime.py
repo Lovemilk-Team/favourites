@@ -19,24 +19,24 @@ Field(..., sa_type=UTCDatetime)
 
 
 class UTCDatetime(types.TypeDecorator):
-    impl = types.TEXT
+    impl = types.BIGINT
 
     cache_ok = True
 
-    def process_bind_param(self, value: datetime | None, _dialect):
+    _ts_rate = 1000_000
+
+    def process_bind_param(self, value: datetime | None, _dialect) -> int | None:
         if value is None:
             return None
 
         if value.tzinfo is None:
-            value = value.replace(tzinfo=UTC)
-        return value.isoformat()
+            value = value.astimezone(UTC)
 
-    def process_result_value(self, value: str | None, _dialect):
+        return round(value.timestamp() * type(self)._ts_rate)
+
+    def process_result_value(self, value: int | None, _dialect) -> datetime | None:
         if value is None:
             return None
 
-        datetime_obj = datetime.fromisoformat(value)
-        if datetime_obj.tzinfo is None:
-            datetime_obj = datetime_obj.replace(tzinfo=UTC)
-
+        datetime_obj = datetime.fromtimestamp(value / type(self)._ts_rate, tz=UTC)
         return datetime_obj
